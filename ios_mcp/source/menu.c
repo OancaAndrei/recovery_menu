@@ -57,7 +57,7 @@ static const Menu mainMenuOptions[] = {
     {"Start wupserver",             {.callback = option_StartWupserver}},
     {"Load Network Configuration",  {.callback = option_LoadNetConf}},
     {"Pair Gamepad",                {.callback = option_PairDRC}},
-    {"Install WUP",                 {.callback = option_InstallWUP}},
+    {"Install WUP (Multi-Install)", {.callback = option_InstallWUP}},
     {"Edit Parental Controls",      {.callback = option_EditParental}},
     {"Debug System Region",         {.callback = option_DebugSystemRegion}},
     {"System Information",          {.callback = option_SystemInformation}},
@@ -711,10 +711,42 @@ static void option_LoadNetConf(void)
     FSA_CloseFile(fsaHandle, cfgHandle);
 }
 
-static void option_InstallWUP(void)
+// TODO: read list from text file on SD card.
+static const char paths[26][18] = {
+    "00050010/10040200",
+    "00050010/10043200",
+    "00050010/10044200",
+    "00050010/10047200",
+    "00050010/10048200",
+    "00050010/10049200",
+    "00050010/1004a200",
+    "00050010/1004b200",
+    "00050010/1004c200",
+    "00050010/1004e200",
+    "00050010/1005a200",
+    "00050010/10062200",
+    "00050010/10066000",
+    "0005001b/1004f000",
+    "0005001b/10052000",
+    "00050030/1001020a",
+    "00050030/100112ff",
+    "00050030/1001220a",
+    "00050030/1001320a",
+    "00050030/1001420a",
+    "00050030/1001520a",
+    "00050030/1001620a",
+    "00050030/1001820a",
+    "00050030/1001920a",
+    "00050030/1001a10a",
+    "00050030/1006d20a",
+};
+
+#define PATHS_COUNT 26
+
+static int _install_title(int id)
 {
     gfx_clear(COLOR_BACKGROUND);
-    drawTopBar("Installing WUP");
+    drawTopBar("Installing WUP (Multi-Install)");
 
     uint32_t index = 16 + 8 + 2 + 8;
     gfx_print(16, index, 0, "Make sure to place a valid signed WUP directly in 'sd:/install'");
@@ -725,22 +757,52 @@ static void option_InstallWUP(void)
         gfx_set_font_color(COLOR_ERROR);
         gfx_printf(16, index, 0, "Failed to open /dev/mcp: %x", mcpHandle);
         waitButtonInput();
-        return;
+        return -1;
     }
 
     gfx_print(16, index, 0, "Querying install info...");
     index += CHAR_SIZE_DRC_Y + 4;
 
+    const char* base_path = "/vol/storage_recovsd/install/";
+    char title_path[50];
+    // Build the path to the title.
+    int len = 0;
+    for (int i = 0; i < 30; i++) {
+        title_path[i] = base_path[i];
+        len++;
+    }
+    for (int i = 0; i < 18; i++) {
+        title_path[i + 29] = paths[id][i];
+        len++;
+    }
+    title_path[len] = '\0';
+
+    // Print the ID.
+    gfx_set_font_color(COLOR_PRIMARY);
+    gfx_printf(16, index, 0, "ID: %d", id);
+    index += CHAR_SIZE_DRC_Y + 4;
+
+    gfx_printf(16, index, 0, "Title: %s", paths[id]);
+    index += CHAR_SIZE_DRC_Y + 4;
+
+    // Print the path.
+    gfx_set_font_color(COLOR_PRIMARY);
+    gfx_printf(16, index, 0, "Path: %s", title_path);
+    index += CHAR_SIZE_DRC_Y + 4;
+
     MCPInstallInfo info;
-    int res = MCP_InstallGetInfo(mcpHandle, "/vol/storage_recovsd/install", &info);
+    int res = MCP_InstallGetInfo(mcpHandle, title_path, &info);
     if (res < 0) {
         gfx_set_font_color(COLOR_ERROR);
         gfx_printf(16, index, 0, "Failed to get install info: %x", res);
         waitButtonInput();
 
         IOS_Close(mcpHandle);
-        return;
+        return -1;
     }
+
+    gfx_printf(16, index, 0, "At title %d of %d...", id + 1, PATHS_COUNT);
+    index += CHAR_SIZE_DRC_Y + 4;
 
     gfx_printf(16, index, 0, "Installing title: %08lx-%08lx...",
         (uint32_t)(info.titleId >> 32), (uint32_t)(info.titleId & 0xFFFFFFFFU));
@@ -754,7 +816,7 @@ static void option_InstallWUP(void)
         waitButtonInput();
 
         IOS_Close(mcpHandle);
-        return;
+        return -1;
     }
     res = MCP_InstallSetTargetUsb(mcpHandle, 0);
     if (res < 0) {
@@ -763,18 +825,18 @@ static void option_InstallWUP(void)
         waitButtonInput();
 
         IOS_Close(mcpHandle);
-        return;
+        return -1;
     }
 
     // TODO: async installations
-    res = MCP_InstallTitle(mcpHandle, "/vol/storage_recovsd/install");
+    res = MCP_InstallTitle(mcpHandle, title_path);
     if (res < 0) {
         gfx_set_font_color(COLOR_ERROR);
         gfx_printf(16, index, 0, "Failed to install: %x", res);
         waitButtonInput();
 
         IOS_Close(mcpHandle);
-        return;
+        return -1;
     }
 
     gfx_set_font_color(COLOR_SUCCESS);
@@ -782,6 +844,19 @@ static void option_InstallWUP(void)
     waitButtonInput();
 
     IOS_Close(mcpHandle);
+
+    return 0;
+}
+
+static void option_InstallWUP(void)
+{
+    for (int i = 0; i < PATHS_COUNT; i++) {
+        int res = _install_title(i);
+
+        if (res < 0) {
+            return;
+        }
+    }
 }
 
 static void option_EditParental(void)
